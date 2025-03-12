@@ -2,14 +2,23 @@ import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
+# Добавьте в начало файла bot.py:
+import threading
 from flask import Flask
+
 app = Flask(__name__)
+
+def run_bot():
+    # Ваш код запуска бота
+    application.run_polling()
 
 @app.route('/')
 def home():
-    return "Bot is running!"
+    return "Bot is active!"
 
 if __name__ == '__main__':
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.start()
     app.run(host='0.0.0.0', port=10000)
 Updater,
     CommandHandler,
