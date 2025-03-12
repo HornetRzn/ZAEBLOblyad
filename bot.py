@@ -1,3 +1,5 @@
+import sys
+import asyncio
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -247,4 +249,6 @@ def main():
     application.run_polling()
 
 if __name__ == '__main__':
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     main()
