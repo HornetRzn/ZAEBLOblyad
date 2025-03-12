@@ -12,67 +12,96 @@ from telegram.ext import (
     ConversationHandler,
     ContextTypes
 )
-from psycopg2 import connect
+from psycopg2 import connect, Error
 
-app = Flask(__name__)
-
-# Конфигурация
-TOKEN = os.getenv('TG_TOKEN')
-DATABASE_URL = os.getenv('DATABASE_URL')
-ADMIN_ID = int(os.getenv('ADMIN_ID'))
+# ================== КОНФИГУРАЦИЯ ==================
+TOKEN = "8190327503:AAGCyqF6o9TsqXgh5oWw0AGB_juo0MzMbPs"
+DATABASE_URL = "postgresql://postgres:SrSq_487DAKKKER_067_FaReYOU_163@db.vmxrnaicqdejwhmgjlxs.supabase.co:5432/postgres?sslmode=require"
+ADMIN_ID = 6141712830  # Замените на ваш ID через @userinfobot
 
 # Состояния регистрации
 REGISTER_NAME, REGISTER_AGE, REGISTER_GENDER, REGISTER_PHOTO, REGISTER_INTERESTS = range(5)
 
+# Инициализация Flask
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Dating Bot is running!"
+
+# Настройка логов
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# ================== БАЗА ДАННЫХ ==================
 def init_db():
+    conn = None
     try:
         conn = connect(DATABASE_URL)
         with conn.cursor() as cur:
+            # Таблица пользователей
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
-                    name VARCHAR(100),
-                    age INTEGER,
-                    gender VARCHAR(10),
-                    photo TEXT,
-                    interests TEXT[],
+                    name VARCHAR(100) NOT NULL,
+                    age INTEGER NOT NULL,
+                    gender VARCHAR(10) NOT NULL,
+                    photo TEXT NOT NULL,
+                    interests TEXT[] NOT NULL,
                     banned BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT NOW()
                 )""")
+            
+            # Таблица лайков
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS likes (
                     id SERIAL PRIMARY KEY,
-                    user_from BIGINT,
-                    user_to BIGINT,
+                    user_from BIGINT NOT NULL,
+                    user_to BIGINT NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW(),
                     UNIQUE(user_from, user_to)
                 )""")
+            
+            # Индекс для поиска
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_users_search 
+                ON users (gender, age)
+            """)
+            
         conn.commit()
-    except Exception as e:
-        logger.error(f"Database error: {e}")
+        logger.info("База данных инициализирована")
+        
+    except Error as e:
+        logger.error(f"Ошибка БД: {e}")
     finally:
         if conn:
             conn.close()
 
 init_db()
 
+# ================== ОСНОВНЫЕ КОМАНДЫ ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    conn = connect(DATABASE_URL)
+    conn = None
     try:
+        conn = connect(DATABASE_URL)
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM users WHERE user_id = %s", (user.id,))
             if cur.fetchone():
-                await update.message.reply_text("🔍 Используйте /search для поиска")
+                await update.message.reply_text(
+                    "👋 С возвращением! Используйте:\n"
+                    "/search - Поиск\n"
+                    "/edit - Редактировать профиль"
+                )
                 return
+    except Error as e:
+        logger.error(f"Ошибка: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
     await update.message.reply_text("👋 Введите ваше имя:")
     return REGISTER_NAME
@@ -86,6 +115,7 @@ async def register_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.text.isdigit():
         await update.message.reply_text("❌ Введите число!")
         return REGISTER_AGE
+    
     context.user_data['age'] = int(update.message.text)
     reply_keyboard = [['Мужской', 'Женский']]
     await update.message.reply_text(
@@ -109,97 +139,125 @@ async def register_interests(update: Update, context: ContextTypes.DEFAULT_TYPE)
     interests = [x.strip() for x in update.message.text.split(',')]
     user = update.message.from_user
     
-    conn = connect(DATABASE_URL)
+    conn = None
     try:
+        conn = connect(DATABASE_URL)
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO users 
                 (user_id, name, age, gender, photo, interests)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    user.id,
-                    context.user_data['name'],
-                    context.user_data['age'],
-                    context.user_data['gender'],
-                    context.user_data['photo'],
-                    interests
-                ))
+                ON CONFLICT (user_id) DO NOTHING
+            """, (
+                user.id,
+                context.user_data['name'],
+                context.user_data['age'],
+                context.user_data['gender'],
+                context.user_data['photo'],
+                interests
+            ))
         conn.commit()
-    except Exception as e:
-        logger.error(f"DB error: {e}")
+    except Error as e:
+        logger.error(f"Ошибка: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
     
     await update.message.reply_text("✅ Профиль создан!")
     return ConversationHandler.END
 
+# ================== ПОИСК И ЛАЙКИ ==================
 async def search_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    conn = connect(DATABASE_URL)
+    conn = None
     try:
+        conn = connect(DATABASE_URL)
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT * FROM users 
                 WHERE user_id != %s 
                 AND banned = FALSE 
-                LIMIT 1""", (user.id,))
+                ORDER BY RANDOM() 
+                LIMIT 1
+            """, (user.id,))
             profile = cur.fetchone()
             
             if not profile:
-                await update.message.reply_text("😢 Анкет нет")
+                await update.message.reply_text("😢 Анкет пока нет")
                 return
 
             keyboard = [
-                [InlineKeyboardButton("❤️", callback_data=f'like_{profile[0]}'),
-                 InlineKeyboardButton("👎", callback_data=f'dislike_{profile[0]}')]
+                [
+                    InlineKeyboardButton("❤️", callback_data=f'like_{profile[0]}'),
+                    InlineKeyboardButton("👎", callback_data=f'dislike_{profile[0]}')
+                ]
             ]
             await update.message.reply_photo(
                 photo=profile[4],
                 caption=f"👤 {profile[1]}, {profile[2]}\n🎯 Интересы: {', '.join(profile[5])}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+    except Error as e:
+        logger.error(f"Ошибка: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 async def like_dislike_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     user_id = query.from_user.id
     action, target_id = query.data.split('_')
     target_id = int(target_id)
     
-    conn = connect(DATABASE_URL)
+    conn = None
     try:
+        conn = connect(DATABASE_URL)
         with conn.cursor() as cur:
             if action == 'like':
                 cur.execute("""
                     SELECT * FROM likes 
-                    WHERE user_from = %s AND user_to = %s""", (target_id, user_id))
+                    WHERE user_from = %s AND user_to = %s
+                """, (target_id, user_id))
+                
                 if cur.fetchone():
-                    await context.bot.send_message(user_id, "💌 Взаимный лайк!")
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=f"💌 Взаимная симпатия! Пишите пользователю: @{target_id}"
+                    )
                 else:
                     cur.execute("""
                         INSERT INTO likes (user_from, user_to) 
-                        VALUES (%s, %s)""", (user_id, target_id))
+                        VALUES (%s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (user_id, target_id))
                     conn.commit()
+    except Error as e:
+        logger.error(f"Ошибка: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
+# ================== АДМИНКА ==================
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
         return
+    
     try:
         target_id = int(context.args[0])
         conn = connect(DATABASE_URL)
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE users SET banned = TRUE 
-                WHERE user_id = %s""", (target_id,))
+                WHERE user_id = %s
+            """, (target_id,))
             conn.commit()
         await update.message.reply_text(f"🚫 Пользователь {target_id} забанен")
     except:
-        await update.message.reply_text("❌ Используйте /ban <user_id>")
+        await update.message.reply_text("❌ Используйте: /ban <user_id>")
 
+# ================== ЗАПУСК ==================
 def run_flask():
     app.run(host='0.0.0.0', port=10000)
 
