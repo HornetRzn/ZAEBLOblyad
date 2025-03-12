@@ -1,7 +1,5 @@
 import os
 import logging
-import threading
-from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,20 +12,13 @@ from telegram.ext import (
 )
 from psycopg2 import connect, Error
 
-# ================== КОНФИГУРАЦИЯ ==================
+# Конфигурация
 TOKEN = "8190327503:AAGCyqF6o9TsqXgh5oWw0AGB_juo0MzMbPs"
 DATABASE_URL = "postgresql://postgres:SrSq_487DAKKKER_067_FaReYOU_163@db.vmxrnaicqdejwhmgjlxs.supabase.co:5432/postgres?sslmode=require"
-ADMIN_ID = 6141712830  # Замените на ваш ID через @userinfobot
+ADMIN_ID = 123456789  # Замените на ваш ID через @userinfobot
 
 # Состояния регистрации
 REGISTER_NAME, REGISTER_AGE, REGISTER_GENDER, REGISTER_PHOTO, REGISTER_INTERESTS = range(5)
-
-# Инициализация Flask
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Dating Bot is running!"
 
 # Настройка логов
 logging.basicConfig(
@@ -36,44 +27,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ================== БАЗА ДАННЫХ ==================
 def init_db():
     conn = None
     try:
         conn = connect(DATABASE_URL)
         with conn.cursor() as cur:
-            # Таблица пользователей
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
-                    name VARCHAR(100) NOT NULL,
-                    age INTEGER NOT NULL,
-                    gender VARCHAR(10) NOT NULL,
-                    photo TEXT NOT NULL,
-                    interests TEXT[] NOT NULL,
-                    banned BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    name VARCHAR(100),
+                    age INTEGER,
+                    gender VARCHAR(10),
+                    photo TEXT,
+                    interests TEXT[],
+                    banned BOOLEAN DEFAULT FALSE
                 )""")
-            
-            # Таблица лайков
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS likes (
                     id SERIAL PRIMARY KEY,
-                    user_from BIGINT NOT NULL,
-                    user_to BIGINT NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
+                    user_from BIGINT,
+                    user_to BIGINT,
                     UNIQUE(user_from, user_to)
                 )""")
-            
-            # Индекс для поиска
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_users_search 
-                ON users (gender, age)
-            """)
-            
         conn.commit()
-        logger.info("База данных инициализирована")
-        
     except Error as e:
         logger.error(f"Ошибка БД: {e}")
     finally:
@@ -82,7 +58,6 @@ def init_db():
 
 init_db()
 
-# ================== ОСНОВНЫЕ КОМАНДЫ ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     conn = None
@@ -91,11 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM users WHERE user_id = %s", (user.id,))
             if cur.fetchone():
-                await update.message.reply_text(
-                    "👋 С возвращением! Используйте:\n"
-                    "/search - Поиск\n"
-                    "/edit - Редактировать профиль"
-                )
+                await update.message.reply_text("👋 Используйте /search для поиска")
                 return
     except Error as e:
         logger.error(f"Ошибка: {e}")
@@ -147,7 +118,6 @@ async def register_interests(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 INSERT INTO users 
                 (user_id, name, age, gender, photo, interests)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (user_id) DO NOTHING
             """, (
                 user.id,
                 context.user_data['name'],
@@ -166,7 +136,6 @@ async def register_interests(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("✅ Профиль создан!")
     return ConversationHandler.END
 
-# ================== ПОИСК И ЛАЙКИ ==================
 async def search_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     conn = None
@@ -224,13 +193,12 @@ async def like_dislike_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 if cur.fetchone():
                     await context.bot.send_message(
                         chat_id=user_id,
-                        text=f"💌 Взаимная симпатия! Пишите пользователю: @{target_id}"
+                        text=f"💌 Взаимная симпатия! Пишите: @{target_id}"
                     )
                 else:
                     cur.execute("""
                         INSERT INTO likes (user_from, user_to) 
                         VALUES (%s, %s)
-                        ON CONFLICT DO NOTHING
                     """, (user_id, target_id))
                     conn.commit()
     except Error as e:
@@ -239,7 +207,6 @@ async def like_dislike_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if conn:
             conn.close()
 
-# ================== АДМИНКА ==================
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
         return
@@ -257,11 +224,7 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("❌ Используйте: /ban <user_id>")
 
-# ================== ЗАПУСК ==================
-def run_flask():
-    app.run(host='0.0.0.0', port=10000)
-
-def run_bot():
+def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
     conv_handler = ConversationHandler(
@@ -284,9 +247,4 @@ def run_bot():
     application.run_polling()
 
 if __name__ == '__main__':
-    flask_thread = threading.Thread(target=run_flask)
-    bot_thread = threading.Thread(target=run_bot)
-    flask_thread.start()
-    bot_thread.start()
-    flask_thread.join()
-    bot_thread.join()
+    main()
