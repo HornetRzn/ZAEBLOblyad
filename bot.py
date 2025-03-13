@@ -13,9 +13,9 @@ from telegram.ext import (
 from psycopg2 import connect, Error
 
 # ================== НАСТРОЙКИ ==================
-TOKEN = os.getenv('TG_TOKEN')
-DATABASE_URL = os.getenv('DATABASE_URL')
-ADMIN_ID = int(os.getenv('ADMIN_ID'))  # Ваш ID через @userinfobot
+TOKEN = os.getenv('8190327503:AAGCyqF6o9TsqXgh5oWw0AGB_juo0MzMbPs')
+DATABASE_URL = os.getenv('postgresql://postgres:SrSq_487DAKKKER_067_FaReYOU_163@db.vmxrnaicqdejwhmgjlxs.supabase.co:5432/postgres?sslmode=require')
+ADMIN_ID = int(os.getenv('6141712830'))  # Ваш ID через @userinfobot
 
 # Состояния регистрации
 REGISTER_NAME, REGISTER_AGE, REGISTER_GENDER, REGISTER_PHOTO, REGISTER_INTERESTS = range(5)
